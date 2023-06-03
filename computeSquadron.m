@@ -29,8 +29,8 @@ if nargin < 7; vis   = 0;                                   end
 if nargin < 8; sdir  = fileparts(which('computeSquadron')); end
 
 %% Load database of team attributes and training regimes
-tin = sprintf('%s/squads.csv', sdir);
-rin = sprintf('%s/training.csv', sdir);
+tin = sprintf('%s/tables/squads.csv', sdir);
+rin = sprintf('%s/tables/training.csv', sdir);
 T   = readtable(tin);
 R   = readtable(rin);
 
