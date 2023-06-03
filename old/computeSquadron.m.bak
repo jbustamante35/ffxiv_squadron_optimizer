@@ -1,0 +1,297 @@
+function [y , z] = squadron_calculator(tinit, mgoal, ntrain, vis, sdir)
+%% squadron_calculator: calculate best possible team for a mission
+%
+% Usage:
+%   [y , z] = squadron_calculator(x, mission_score)
+%
+% Input:
+%   x:
+%   mission_score:
+%
+% Output:
+%   y:
+%   z:
+
+if nargin < 1; tinit  = repmat(100, 1, 3); end
+if nargin < 2; mgoal  = [430 , 295 , 600]; end
+if nargin < 3; ntrain = 6;                 end
+if nargin < 4; vis    = 0;                 end
+if nargin < 5; sdir   = pwd;               end
+
+[~ , sprA , sprB] = jprintf(' ', 0, 0, 80);
+
+%% Load database of squads
+sin = sprintf('%s/squads.csv', sdir);
+tin = sprintf('%s/training.csv', sdir);
+S   = readtable(sin);
+T   = readtable(tin);
+
+% styp = S.Class;
+ttyp = T.Training;
+
+% training_order = {'PA' , 'PM' , 'PA' , 'PT' , 'PA' , 'PA'};
+% tord = [];
+% tinit          = [100 , 40 , 150];
+
+%% Do a ton of simulations
+ntrain = 2;
+
+% All Team Combinations
+svec = 1 : numel(styp);
+scmb = combvec(svec,svec,svec,svec)';
+scmb(any(diff(sort(scmb,2),[],2) == 0,2),:) = [];
+
+% All Training Combinations
+tvec = 1 : numel(ttyp);
+xstr = ['tvec' , repmat(',tvec', 1, ntrain - 1)];
+tcmb = sortrows(eval(sprintf('combvec(%s)''', xstr)));
+
+% Concatenate all training combos onto all team combos
+nsc  = size(scmb,1);
+ntc  = size(tcmb,1);
+acmb = arrayfun(@(x) [repmat(scmb(x,:), ntc, 1) , tcmb], ...
+    1 : nsc, 'UniformOutput', 0)';
+acmb = cat(1, acmb{:});
+nac  = size(acmb,1);
+
+% Run a million combinations in parallel
+[stot , scls , atot , ttot , sgud , ttrn , nchk] = deal(cell(nac,1));
+
+X = struct('ClassIndex', 0, 'ClassOrder', [], ...
+            'ClassScore', [], 'TrainingScore', [], ...
+            'TrainingOrder', [], 'PassSum', 0);
+Y = repmat(X, nac, 1);
+
+%%
+% tinit = [200 , 0 , 200];
+tinit = [180 , 40 , 180];
+
+t = tic;
+if vis; fprintf('%s\n', sprA); end
+parfor si = 1 : nac
+    nteam = acmb(si,1:4);
+    tord  = acmb(si,5:end);
+
+    [stot{si} , scls{si}] = pickTeam(S, nteam, vis);
+    [ttot{si} , ttrn{si}] = commenceTraining( ...
+        T, tinit, ntrain, tord, vis);
+    [nchk{si} , sgud{si} , ~ , atot{si}] = simulateMission( ...
+        stot{si}, ttot{si}, mgoal, vis);
+
+    %
+    npass = nchk{si};
+    if npass
+        Y(si).ClassIndex    = si;
+        Y(si).ClassOrder    = scls{si};
+        Y(si).ClassScore    = stot{si};
+        Y(si).TrainingScore = atot{si};
+        Y(si).TrainingOrder = ttrn{si};
+        Y(si).PassSum       = npass;
+    end
+
+    %
+    if vis
+        if npass
+            sg = sgud{si};
+            fprintf(['| Run %03d | Team %s | Train %s | ' ...
+                'Phys %d | Men %d | Tac %d | Good %d |\n'], ...
+                si, num2str(nteam), num2str(tord), sg, npass);
+        end
+    end
+end
+
+%
+Y = Y(arrayfun(@(x) x.PassSum > 0, Y));
+Z = Y(arrayfun(@(x) x.PassSum == 3, Y));
+if vis
+    fprintf('%s\n[%.02f min] Found %d Perfect Teams (%d OK)\n%s\n', ...
+        sprB, mytoc(t, 'min'), numel(Z), numel(Y), sprA);
+end
+
+%%
+% % Pick Team of 4 --> Commence N sets of M Training --> Simulate Mission
+% vis     = 1;
+% ntrain  = 3;
+% nattmps = 100;
+% steams  = size(scmb,1);
+% schks   = 50;
+% schk    = scmb(pullRandom(1 : steams, 100, 0),:);
+% 
+% %
+% [stot , scls , Y] = deal(cell(schks,1));
+% [atot , ttot , sgud , ttrn , nchk] = deal(cell(schks,nattmps));
+% 
+% %
+% if vis; fprintf('%s\n', sprA); end
+% for si = 1 : schks
+%     nteam         = schk(si,:);
+%     [stot{si} , scls{si}] = pickTeam(S, nteam, vis);
+%     for ni = 1 : nattmps
+%         [ttot{si,ni} , ttrn{si,ni}] = commenceTraining( ...
+%             T, tinit, ntrain, tord, vis);
+% 
+%         [nchk{si,ni} , sgud{si,ni} , ~ , atot{si,ni}] = simulateMission( ...
+%             stot{si}, ttot{si,ni}, mgoal, vis);
+%     end
+% 
+%     npass = sum(cell2mat(nchk(si,:)));
+%     ipass = find(cell2mat(nchk(si,:)));
+% 
+%     %
+%     if npass
+%         X.ClassIndex    = si;
+%         X.ClassOrder    = scls{si};
+%         X.ClassScore    = stot{si};
+%         X.TrainingScore = cat(1, atot{si,ipass});
+%         X.TrainingOrder = cat(1, ttrn{si,ipass});
+%         X.PassIndex     = ipass;
+%         X.PassSum       = cat(1, nchk{si,ipass});
+%         X.PassTotal     = npass;
+% 
+%         Y{si} = X;
+%     end
+% 
+%     %
+%     if vis
+%         if npass
+%             sg = cat(1, sgud{si,ipass});
+%             nc = cat(1, nchk{si,ipass});
+%             arrayfun(@(x) fprintf(['| Team %03d | Test %03d | Phys %d | ' ...
+%                 'Men %d | Tac %d | Good %d |\n'], ...
+%                 si, ipass(x), sg(x,:), nc(x)), 1 : npass);
+%             fprintf('%s\n', sprB);
+%         else
+%             fprintf('| Team %03d | Attempts %03d | Good %d |\n%s\n', ...
+%                 si, nattmps, npass, sprB);
+%         end
+%     end
+% end
+% 
+% Y = cat(1, Y{:});
+% 
+% stot;
+% scls;
+% ttot;
+% ttrn;
+% sgud;
+% atot;
+% 
+% if vis; fprintf('| Found %d Viable Teams\n%s\n', numel(Y), sprA); end
+end
+
+function [nCheck , isGood , sdif , atot] = simulateMission(stot, ttot, mgoal, vis)
+%% simulateMission: run mission
+if nargin < 3; vis = 0; end
+
+[~ , sprA , sprB] = jprintf(' ', 0, 0, 80);
+
+%
+atot   = stot + ttot;
+sdif   = atot - mgoal;
+isGood = sdif >= 0;
+nCheck = sum(isGood);
+
+%
+switch nCheck
+    case 1;    nCheck = 0; % No Good
+    case 2;    nCheck = 1; % Partial Pass
+    case 3;    nCheck = 3; % Full Success
+    otherwise; nCheck = 0; % No Success
+end
+
+if vis == 3
+    fprintf(['Simulating Mission\n%s\n'       ...
+        '| Sets  | Phys | Men | Tac |\n'      ...
+        '| ---   | ---  | --- | --- |\n'      ...
+        '| Team  | %03d  | %03d | %03d |\n'   ...
+        '| Train | %03d  | %03d | %03d |\n'   ...
+        '| ---   | ---  | --- | --- |\n'      ...
+        '| Full  | %03d  | %03d | %03d |\n'   ...
+        '| Goal  | %03d  | %03d | %03d |\n'   ...
+        '| Diff  | %03d  | %03d | %03d |\n'   ...
+        '| Chk   |  %d   |  %d  |  %d  |\n%s\n'
+        ], sprB, stot, ttot, atot, mgoal, sdif, isGood, sprA);
+end
+end
+
+function [ttot , training_order] = commenceTraining(T, ttot, ntrain, training_order, vis)
+%% commenceTraining: perform training
+if nargin < 2; ttot           = repmat(100, 1, 3); end
+if nargin < 3; ntrain         = 6;                 end
+if nargin < 4; training_order = [];                end
+
+ttyp = T.Training;
+if isempty(training_order); training_order = pullRandom(ttyp, ntrain, 1); end
+if ~iscell(training_order); training_order = ttyp(training_order); end
+
+%
+[~ , sprA , sprB] = jprintf(' ', 0, 0, 80);
+if vis == 3
+    fprintf('Commencing Training [%d sessions]\n%s\n', ntrain, sprB);
+end
+ti = 1;
+while ti <= ntrain
+    tfld  = training_order{ti};
+    tstat = T(strcmpi(tfld, T.Training),:);
+    ttmp  = ttot + [tstat.Phys , tstat.Men , tstat.Tac];
+
+    if any(ttmp < 0)
+        rtyp = cell2mat(pullRandom(ttyp, 1, 1));
+        if vis == 3
+            fprintf(2, ['| %d | %s | %03d | %03d | %03d | ' ...
+                'Can''t go lower than 0! Attempting %s\n'], ...
+                ti, tfld, ttot, rtyp);
+        end
+        training_order{ti} = rtyp;
+    else
+        ttot = ttmp;
+        if vis == 3
+            fprintf('| %d | %s | %03d | %03d | %03d |\n', ...
+                ti, tfld, ttot);
+        end
+        ti = ti + 1;
+    end
+end
+
+training_order = training_order';
+
+if vis == 3
+    fprintf('%s\nTraining Total [Phy %03d | Men %03d | Tac %03d |\n%s\n', ...
+        sprB, ttot, sprA);
+end
+end
+
+function [stot , team_classes] = pickTeam(S, nteam, vis)
+%% pickTeam: select team members
+if nargin < 2; nteam = 4; end
+if nargin < 3; vis   = 0; end
+
+[~ , sprA , sprB] = jprintf(' ', 0, 0, 80);
+
+%
+styp  = S.Class;
+
+if numel(nteam) > 1
+    % Use selected
+    sidx  = nteam(1,:);
+    steam = S(sidx,:);
+else
+    % Choose random n
+    sflds = pullRandom(styp, nteam, 1);
+    ss    = cellfun(@(x) strcmpi(x, styp), sflds, 'UniformOutput', 0);
+    s     = cellfun(@(x) S(x,:), ss, 'UniformOutput', 0);
+    steam = cat(1, s{:});
+end
+
+%
+team_classes = steam.Class';
+stot         = sum([steam.Phy , steam.Men , steam.Tac]);
+
+%
+if vis == 3
+    fprintf('\n%s\nTeam Selected\n%s\n', sprA, sprB);
+    disp(steam);
+    fprintf('%s\nStarting Total [Phy %03d | Men %03d | Tac %03d]\n%s\n', ...
+        sprB, stot, sprB);
+end
+end

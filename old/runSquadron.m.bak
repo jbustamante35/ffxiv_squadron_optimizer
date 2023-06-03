@@ -1,0 +1,148 @@
+function Y = runSquadron(init, xinn, nopts, itf, itx)
+%% run_squadron
+%
+% Usage:
+%   Y = run_squadron(tinit, xinn, nopts, tolf, tolx)
+%
+% Input:
+%   x:
+%   mission_score:
+%
+% Output:
+%   y:
+%   z:
+% tinit  = [180 , 40 , 180];
+% ntrain = 2;
+
+if nargin < 3; nopts = 1000; end
+if nargin < 4; itf   = 1e-4; end
+if nargin < 5; itx   = 1e-4; end
+
+%%
+mgoal = [430 , 295 , 600];
+nteam = 4;
+nregs = 3;
+vis   = 0;
+sdir  = fileparts(which('computeSquadron'));
+
+init    = [200 , 0 , 200];
+tidx    = [2 , 5 , 9 , 8];
+ridx    = [2 , 2 , 2];
+[y , Y] = computeSquadron(tidx, ridx, init, mgoal, nteam, nregs, vis, sdir);
+
+xinn    = [tidx , ridx , init];
+[y , Y] = squadronWrapper(xinn, mgoal, nteam, nregs, vis, sdir);
+
+%%
+nopts = 1000;
+% init  = [100 , 100 , 100];
+init  = [200 , 0 , 200];
+tidx  = [2 , 5 , 8 , 9];
+ridx  = [1 , 2 , 5];
+
+%
+fi = @(i) computeSquadron(tidx, ridx, i,    mgoal, nteam, nregs, vis, sdir);
+ft = @(t) computeSquadron(t,    ridx, init, mgoal, nteam, nregs, vis, sdir);
+fr = @(r) computeSquadron(tidx, r,    init, mgoal, nteam, nregs, vis, sdir);
+fa = @(x) squadronWrapper(x, mgoal, nteam, nregs, vis, sdir);
+fm = @(m)@(x) squadronWrapper(x, m, nteam, nregs, vis, sdir);
+fg = @(m)@(x) squadronWrapper([x , init], m, nteam, nregs, vis, sdir);
+
+%% Optimize on initial start point
+ilb = zeros(1, 3);
+iub = repmat(200, 1, 3);
+itf  = 1e-2;
+itx  = 1e-2;
+ito  = optimset('Display', 'off', 'MaxIter', nopts, ...
+    'TolFun', itf, 'TolX', itx);
+[iopt , ival] = patternsearch(fi, init, [], [], [], [], ilb, iub, ito);
+
+%% Optimize on team index
+% tlb  = ones(1, nteam);
+% tub  = repmat(9, 1, nteam);
+tlb  = [1 , 3 , 3 , 9];
+tub  = [2 , 8 , 8 , 9];
+ttf  = 1e-2;
+ttx  = 1e-2;
+tto  = optimset('Display', 'off', 'MaxIter', nopts, ...
+    'TolFun', ttf, 'TolX', ttx);
+[topt , tval] = patternsearch(ft, tidx, [], [], [], [], tlb, tub, tto);
+
+%% Optimize on regime index
+rlb  = ones(1, nregs);
+rub  = repmat(6, 1, nregs);
+rtf  = 1e-2;
+rtx  = 1e-2;
+rto  = optimset('Display', 'off', 'MaxIter', nopts, ...
+    'TolFun', rtf, 'TolX', rtx);
+[ropt , rval] = patternsearch(fr, ridx, [], [], [], [], rlb, rub, rto);
+
+%% Optimize full set
+ano  = 10000;
+alb  = [tlb , rlb , ilb];
+aub  = [tub , rub , iub];
+atf  = 1e-2;
+atx  = 1e-2;
+ato  = optimset('Display', 'off', 'MaxIter', ano, 'TolFun', atf, 'TolX', atx);
+[aopt , aval] = patternsearch(fa, xinn, [], [], [], [], alb, aub, ato);
+
+%% Optimize full set with varying goal
+mno  = 10000;
+mlb  = [tlb , rlb , ilb];
+mub  = [tub , rub , iub];
+mtf  = 1e-2;
+mtx  = 1e-2;
+mto  = optimset('Display', 'off', 'MaxIter', mno, 'TolFun', mtf, 'TolX', mtx);
+
+% Set initial parameters
+init = [100 , 100 , 100];
+tidx = [2 , 5 , 8 , 9];
+ridx = [3 , 2 , 5];
+xinn = [tidx , ridx , init];
+
+% Set goal
+mgoal = [430 , 295 , 600]; % Most difficult mission
+% mgoal = [235 , 245 , 255]; % Easy mission
+
+% Run optimizer
+[mopt , mval] = patternsearch(fm(mgoal), xinn, [], [], [], [], mlb, mub, mto);
+
+%% Optimize full set with varying goal but only training and classes
+nregs = 3;
+rlb   = ones(1, nregs);
+rub   = repmat(6, 1, nregs);
+
+%
+gno  = 10000;
+glb  = [tlb , rlb];
+gub  = [tub , rub];
+gtf  = 1e-1;
+gtx  = 1e-1;
+gto  = optimset('Display', 'off', 'MaxIter', gno, 'TolFun', gtf, 'TolX', gtx);
+
+% Set initial parameters
+tidx  = [2 , 5 , 8 , 9];
+% ridx  = [3 , 2 , 5 , 3];
+ridx  = repmat(7, 1, nregs);
+ginn  = [tidx , ridx];
+
+%
+init = [200 , 0 , 200];
+fg = @(m)@(x) squadronWrapper([x , init], m, nteam, nregs, vis, sdir);
+
+% Set goal
+% mgoal = [430 , 295 , 600]; % Most difficult mission
+% mgoal = [235 , 245 , 255]; % Easy mission
+% mgoal = [590 , 305 , 430]; % Hard mission
+mgoal = [370 , 355 , 345]; % Medium mission
+
+% Run optimizer
+gopt = patternsearch(fg(mgoal), ginn, [], [], [], [], glb, gub, gto);
+
+% Check optimized solution
+xx      = fg(mgoal);
+[y , Y] = xx(gopt);
+end
+
+
+
